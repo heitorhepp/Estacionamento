@@ -1,0 +1,40 @@
+# Blueprint do Render (back-end). Em Render → New → Blueprint, aponte para este repositório.
+# Variáveis com "sync: false" são preenchidas no painel do Render (nunca no código).
+services:
+  - type: web
+    name: parkflow-api
+    runtime: node
+    rootDir: backend
+    plan: free
+    # --include=dev: o build precisa do TypeScript e do Prisma CLI (devDependencies).
+    buildCommand: npm install --include=dev && npm run build
+    # O start aplica as migrations pendentes (prisma migrate deploy) e sobe a API.
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 1d
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: GOOGLE_CLIENT_ID
+        sync: false

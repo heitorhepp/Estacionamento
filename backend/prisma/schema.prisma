@@ -1,0 +1,217 @@
+// =============================================================================
+// schema.prisma
+// Modelo de dados do Sistema de Controle de Estacionamento.
+// Define as tabelas (models), enums e relacionamentos usados pelo Prisma ORM
+// para gerar o client tipado e as migrations do PostgreSQL (Neon).
+//
+// Convenções:
+// - Nomes dos models e campos seguem o domínio definido no enunciado (português).
+// - Valores monetários usam Decimal(10, 2) — nunca Float, para evitar erros
+//   de arredondamento com dinheiro.
+// - Datas/horas são gravadas em UTC (timestamptz). A conversão para o fuso
+//   America/Sao_Paulo acontece na aplicação (utils/date), de forma centralizada.
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // Neon usa pooler (PgBouncer) na DATABASE_URL; migrations precisam da
+  // conexão direta, por isso a DIRECT_URL separada.
+  directUrl = env("DIRECT_URL")
+}
+
+// -----------------------------------------------------------------------------
+// Enums
+// -----------------------------------------------------------------------------
+
+/// Papel do usuário: define o que ele pode acessar.
+enum Role {
+  ADMIN
+  OPERADOR
+  CLIENTE
+}
+
+/// Tipo de veículo — também usado para o tipo da vaga e da tabela de preço.
+enum TipoVeiculo {
+  CARRO
+  MOTO
+}
+
+/// Forma de pagamento registrada na saída.
+/// MENSALISTA = saída sem custo, coberta pela mensalidade em dia.
+enum FormaPagamento {
+  PIX
+  DINHEIRO
+  CARTAO
+  MENSALISTA
+}
+
+/// Ciclo de vida de uma movimentação (estadia no pátio).
+enum StatusMovimentacao {
+  ABERTA
+  FINALIZADA
+  CANCELADA
+}
+
+// -----------------------------------------------------------------------------
+// Usuários e clientes
+// -----------------------------------------------------------------------------
+
+/// Qualquer pessoa que faz login: funcionários (ADMIN/OPERADOR) e clientes.
+model Usuario {
+  id        String   @id @default(uuid())
+  nome      String
+  email     String   @unique
+  /// Hash bcrypt. Nulo para quem criou a conta só pelo Google (pode definir depois).
+  senha     String?
+  /// "sub" do ID token do Google. Único: uma conta Google = um usuário.
+  googleId  String?  @unique
+  avatarUrl String?
+  role      Role
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  /// Perfil de cliente (só existe quando role = CLIENTE).
+  cliente Cliente?
+
+  // Movimentações e pagamentos lançados por este usuário como funcionário.
+  // Relações nomeadas porque Movimentacao aponta duas vezes para Usuario.
+  entradasRegistradas    Movimentacao[]         @relation("OperadorEntrada")
+  saidasRegistradas      Movimentacao[]         @relation("OperadorSaida")
+  pagamentosRegistrados  PagamentoMensalidade[]
+}
+
+/// Dados de cliente do estacionamento (avulso ou mensalista).
+/// Separado de Usuario para não poluir a tabela de login com dados de negócio.
+model Cliente {
+  id             String    @id @default(uuid())
+  usuarioId      String    @unique
+  /// Opcional no cadastro, mas se informado não pode repetir.
+  cpf            String?   @unique
+  telefone       String?
+  mensalista     Boolean   @default(false)
+  valorMensal    Decimal?  @db.Decimal(10, 2)
+  /// Só a data (sem hora): o mensalista está "em dia" até o fim deste dia.
+  dataVencimento DateTime? @db.Date
+
+  // Apagar o usuário apaga o perfil de cliente junto.
+  usuario    Usuario                @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  veiculos   Veiculo[]
+  pagamentos PagamentoMensalidade[]
+}
+
+/// Cada pagamento de mensalidade. Registrar um pagamento avança a
+/// dataVencimento do cliente em 1 mês (mesma transação — regra 12).
+model PagamentoMensalidade {
+  id            String   @id @default(uuid())
+  clienteId     String
+  valor         Decimal  @db.Decimal(10, 2)
+  dataPagamento DateTime @default(now()) @db.Timestamptz(6)
+  /// Mês de referência no formato "AAAA-MM" (ex.: "2026-11").
+  referenciaMes String
+  operadorId    String
+
+  // Restrict: apagar o cliente não pode apagar receita já registrada no faturamento.
+  cliente  Cliente @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  operador Usuario @relation(fields: [operadorId], references: [id])
+
+  /// Regra 12: não pode haver dois pagamentos do mesmo mês para o mesmo cliente.
+  /// Garantido pelo banco, então nem uma requisição duplicada passa.
+  @@unique([clienteId, referenciaMes])
+}
+
+/// Veículo cadastrado por um cliente (usado para reconhecer mensalistas na entrada).
+model Veiculo {
+  id        String      @id @default(uuid())
+  clienteId String
+  /// Sempre maiúscula e sem hífen (ex.: ABC1234 ou ABC1D23) — regra 3.
+  placa     String      @unique
+  modelo    String
+  cor       String
+  tipo      TipoVeiculo
+  fotoUrl   String?
+
+  cliente       Cliente        @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  movimentacoes Movimentacao[]
+}
+
+// -----------------------------------------------------------------------------
+// Pátio
+// -----------------------------------------------------------------------------
+
+/// Vaga física do estacionamento.
+model Vaga {
+  id     String      @id @default(uuid())
+  /// Código visível no mapa (ex.: A01).
+  codigo String      @unique
+  tipo   TipoVeiculo
+  setor  String
+  /// Vaga inativa não recebe veículo (manutenção, interditada etc.).
+  ativa  Boolean     @default(true)
+
+  movimentacoes Movimentacao[]
+}
+
+/// Tabela de preços vigente — uma linha por tipo de veículo.
+model TabelaPreco {
+  id                 String      @id @default(uuid())
+  tipoVeiculo        TipoVeiculo @unique
+  toleranciaMinutos  Int
+  valorPrimeiraHora  Decimal     @db.Decimal(10, 2)
+  valorHoraAdicional Decimal     @db.Decimal(10, 2)
+  valorDiaria        Decimal     @db.Decimal(10, 2)
+}
+
+/// Uma estadia: da entrada até a saída (ou cancelamento) de um veículo.
+model Movimentacao {
+  id                String      @id @default(uuid())
+
+  // Dados do veículo copiados na entrada. Ficam aqui (e não só em Veiculo)
+  // porque a maioria das estadias é de avulsos sem cadastro, e porque o
+  // histórico não deve mudar se o cliente editar o veículo depois.
+  placa             String
+  tipoVeiculo       TipoVeiculo
+  modelo            String
+  cor               String
+
+  vagaId            String
+  /// Preenchido quando a placa pertence a um Veiculo cadastrado (regra 6).
+  veiculoId         String?
+  fotoEntradaUrl    String?
+  avariasObservadas String?
+
+  operadorEntradaId String
+  operadorSaidaId   String?
+  dataHoraEntrada   DateTime    @default(now()) @db.Timestamptz(6)
+  dataHoraSaida     DateTime?   @db.Timestamptz(6)
+
+  // Regra 5 — preço congelado: cópia da TabelaPreco no momento da entrada.
+  // A saída é calculada com ESTES valores, então alterar a tabela não afeta
+  // quem já está no pátio.
+  precoToleranciaMinutos Int
+  precoPrimeiraHora      Decimal @db.Decimal(10, 2)
+  precoHoraAdicional     Decimal @db.Decimal(10, 2)
+  precoDiaria            Decimal @db.Decimal(10, 2)
+
+  /// Calculado SEMPRE no back-end na confirmação da saída (regra 4).
+  valorCobrado       Decimal?           @db.Decimal(10, 2)
+  formaPagamento     FormaPagamento?
+  status             StatusMovimentacao @default(ABERTA)
+  motivoCancelamento String?
+
+  // Vaga com histórico não pode ser apagada (Restrict): o caminho é desativá-la.
+  vaga            Vaga     @relation(fields: [vagaId], references: [id], onDelete: Restrict)
+  // Se o cliente apagar o veículo, o histórico continua (só perde o vínculo).
+  veiculo         Veiculo? @relation(fields: [veiculoId], references: [id], onDelete: SetNull)
+  operadorEntrada Usuario  @relation("OperadorEntrada", fields: [operadorEntradaId], references: [id])
+  operadorSaida   Usuario? @relation("OperadorSaida", fields: [operadorSaidaId], references: [id])
+
+  // Índices para as consultas mais frequentes:
+  @@index([placa, status])     // regra 1: placa já tem movimentação ABERTA?
+  @@index([vagaId, status])    // regra 2/11: vaga está ocupada?
+  @@index([status, dataHoraEntrada]) // histórico por período e dashboard
+  @@index([veiculoId, status]) // regra 7: mensalista já tem outro veículo no pátio?
+}
