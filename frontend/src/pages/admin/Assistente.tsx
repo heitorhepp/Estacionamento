@@ -12,14 +12,8 @@ import { Card } from '../../components/Card';
 import { PageHeader } from '../../components/PageHeader';
 import { dashboardService } from '../../services/dashboard.service';
 import { useAuthStore } from '../../stores/authStore';
+import { useAssistenteStore } from '../../stores/assistenteStore';
 import { getErrorMessage } from '../../utils/errors';
-
-interface Message {
-  id: number;
-  role: 'user' | 'assistant';
-  text: string;
-  error?: boolean;
-}
 
 const suggestions = [
   'Qual dia teve mais movimento esta semana?',
@@ -30,25 +24,26 @@ const suggestions = [
 
 export function Assistente() {
   const user = useAuthStore((state) => state.user);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const { messages, thinking, addMessage, setThinking } = useAssistenteStore();
   const [input, setInput] = useState('');
-  const [thinking, setThinking] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
   // Rola até a última mensagem.
-  useEffect(() => endRef.current?.scrollIntoView({ behavior: 'smooth' }), [messages, thinking]);
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, thinking]);
 
   async function ask(question: string) {
     const text = question.trim();
     if (text.length < 3 || thinking) return;
     setInput('');
-    setMessages((m) => [...m, { id: Date.now(), role: 'user', text }]);
+    addMessage({ id: Date.now(), role: 'user', text });
     setThinking(true);
     try {
       const { resposta } = await dashboardService.ask(text);
-      setMessages((m) => [...m, { id: Date.now(), role: 'assistant', text: resposta }]);
+      addMessage({ id: Date.now(), role: 'assistant', text: resposta });
     } catch (err) {
-      setMessages((m) => [...m, { id: Date.now(), role: 'assistant', text: getErrorMessage(err), error: true }]);
+      addMessage({ id: Date.now(), role: 'assistant', text: getErrorMessage(err), error: true });
     } finally {
       setThinking(false);
     }

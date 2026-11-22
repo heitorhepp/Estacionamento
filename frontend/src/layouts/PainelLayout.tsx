@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { Avatar } from '../components/Avatar';
 import { Logo } from '../components/Logo';
+import { useAssistenteStore } from '../stores/assistenteStore';
 import { useAuthStore } from '../stores/authStore';
 import type { Role } from '../types';
 import { ROLE_LABEL } from '../utils/format';
@@ -107,6 +108,7 @@ export function PainelLayout() {
   const { user, logout } = useAuthStore();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const location = useLocation();
+  const clearAssistente = useAssistenteStore((state) => state.clearMessages);
 
   // Fecha o drawer ao trocar de página.
   useEffect(() => setDrawerOpen(false), [location.pathname]);
@@ -156,7 +158,10 @@ export function PainelLayout() {
             </div>
             <Avatar name={user.nome} url={user.avatarUrl} />
             <button
-              onClick={logout}
+              onClick={() => {
+                clearAssistente();
+                logout();
+              }}
               className="ml-1 inline-flex h-10 items-center gap-2 rounded-xl px-3 text-sm font-medium text-ink-500 transition-colors hover:bg-occupied-50 hover:text-occupied-600"
               title="Sair"
             >

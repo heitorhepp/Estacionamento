@@ -41,8 +41,15 @@ function toFriendlyAiError(err: unknown): AppError {
     if (err.status === 429) {
       return new AppError('A IA atingiu o limite de requisições. Aguarde cerca de um minuto e tente novamente.', 429);
     }
+    // 404 = o modelo de GEMINI_MODEL não existe ou foi descontinuado pelo Google.
+    if (err.status === 404) {
+      return new AppError(`O modelo de IA "${geminiModel}" não está disponível. Atualize GEMINI_MODEL no servidor.`, 503);
+    }
     if (err.status === 401 || err.status === 403) {
       return new AppError('A chave da IA é inválida ou não tem permissão. Avise o administrador.', 503);
+    }
+    if (err.status === 503) {
+      return new AppError('O Gemini está com alta demanda no momento. Aguarde alguns instantes e tente novamente.', 503);
     }
   }
   return new AppError('O serviço de IA está indisponível no momento. Tente novamente em instantes.', 502);
@@ -141,11 +148,24 @@ export async function askAssistant(question: string) {
   const summary = await buildDataSummary();
 
   try {
-    const response = await client.models.generateContent({
-      model,
-      contents: `DADOS:\n${JSON.stringify(summary)}\n\nPERGUNTA: ${question}`,
-      config: { systemInstruction: ASSISTANT_INSTRUCTIONS, temperature: 0.2 },
-    });
+    let response;
+    let lastError: unknown;
+
+    for (const candidate of [model, 'gemini-3.6-flash', 'gemini-2.5-flash-lite'].filter((name, index, names) => names.indexOf(name) === index)) {
+      try {
+        response = await client.models.generateContent({
+          model: candidate,
+          contents: `DADOS:\n${JSON.stringify(summary)}\n\nPERGUNTA: ${question}`,
+          config: { systemInstruction: ASSISTANT_INSTRUCTIONS, temperature: 0.2 },
+        });
+        break;
+      } catch (err) {
+        lastError = err;
+        if (!(err instanceof ApiError) || (err.status !== 503 && err.status !== 429 && err.status !== 404)) throw err;
+      }
+    }
+
+    if (!response) throw lastError;
 
     const answer = response.text?.trim();
     if (!answer) throw new AppError('A IA não conseguiu responder. Tente reformular a pergunta.', 502);

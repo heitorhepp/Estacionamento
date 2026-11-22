@@ -153,7 +153,7 @@ estacionamento/
 ### Google Gemini
 1. Acesse https://aistudio.google.com/apikey e clique em **Create API key**.
 2. Use a chave em `GEMINI_API_KEY`.
-3. Em `GEMINI_MODEL`, coloque um modelo com suporte a imagem e JSON, por exemplo `gemini-2.5-flash`.
+3. Em `GEMINI_MODEL`, coloque um modelo com suporte a imagem e JSON, por exemplo `gemini-3.8-flash`.
 
 O plano gratuito tem limite de requisições por minuto. A API responde com uma mensagem amigável (429) quando o limite estoura.
 
@@ -358,7 +358,7 @@ As variáveis `VITE_*` são gravadas no build. Se alterar alguma, faça um novo 
 | `JWT_EXPIRES_IN` | `1d` | não (padrão `1d`) |
 | `FRONTEND_URL` | `https://parkflow.vercel.app` (várias origens: separe por vírgula) | sim |
 | `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` | credenciais do Cloudinary | para fotos |
-| `GEMINI_API_KEY` / `GEMINI_MODEL` | chave do AI Studio / `gemini-2.5-flash` | para IA |
+| `GEMINI_API_KEY` / `GEMINI_MODEL` | chave do AI Studio / `gemini-3.8-flash` | para IA |
 | `GOOGLE_CLIENT_ID` | `xxxx.apps.googleusercontent.com` | para login Google |
 | `PORT` | definida pelo Render | automática |
 
